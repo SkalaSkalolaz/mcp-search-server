@@ -50,6 +50,11 @@ func DefaultSafeSearchConfig() SafeSearchConfig {
 			"developer.mozilla.org",
 			"en.wikipedia.org",
 			"ru.wikipedia.org",
+            "wttr.in",
+			"meteum.ai",
+			"yandex.com",
+			"open-meteo.com",
+			"google.com",
 		},
 	}
 }
@@ -199,6 +204,12 @@ func (s *SafeSearcher) filterAndSanitize(result *Result) *Result {
 
 	if result.Content != "" {
 		content := result.Content
+		// Обрезка на уровне отдельного источника.
+		perSource := s.config.MaxContentPerSource
+		if perSource > 0 && len(content) > perSource {
+			content = content[:perSource] + "\n... [content truncated for safety]"
+		}
+		// Обрезка на уровне всего контента.
 		if len(content) > s.config.MaxTotalContent {
 			content = content[:s.config.MaxTotalContent] + "\n... [content truncated for safety]"
 		}

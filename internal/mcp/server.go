@@ -84,19 +84,22 @@ func (s *Server) handleWebSearch(
 ) (*mcp.CallToolResult, SearchOutput, error) {
 	s.log.Info("web_search called", "query", args.Query)
 
-	// Вызываем SafeSearcher — вся безопасность (rate-limit, whitelist,
-	// санитизация, anti-prompt-injection) реализована там.
 	result, err := s.safeSearcher.Search(ctx, args.Query)
 	if err != nil {
 		s.log.Warn("web_search failed", "query", args.Query, "err", err)
-		// Возвращаем ошибку — SDK сам установит IsError=true и текст ошибки.
-		return nil, SearchOutput{}, fmt.Errorf("search error: %w", err)
+		// Ошибка выполнения инструмента — не протокольная.
+		// Возвращаем CallToolResult{IsError:true}, err = nil,
+		// чтобы LLM увидел текст ошибки и мог скорректировать поведение.
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("search error: %v", err)},
+			},
+			IsError: true,
+		}, SearchOutput{}, nil
 	}
 
-	// Форматируем результат для prompt с маркерами недоверенного контента.
 	formatted := search.FormatForPrompt(result)
 
-	// Собираем структурированный вывод.
 	var urls []string
 	for _, src := range result.Sources {
 		urls = append(urls, src.URL)
@@ -112,8 +115,6 @@ func (s *Server) handleWebSearch(
 		"content_len", len(result.Content),
 	)
 
-	// Content заполняем вручную (текст для LLM),
-	// StructuredContent SDK заполнит из output автоматически.
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: formatted},
@@ -121,16 +122,12 @@ func (s *Server) handleWebSearch(
 	}, output, nil
 }
 
-// HTTPHandler возвращает http.Handler для Streamable HTTP транспорта.
-// Подключается к mux по пути /mcp.
+// HTTPHandler возвращает http.Handler для SSE-транспорта.
+// SSE стабильнее работает через CORS-прокси llama-server,
+// чем Streamable HTTP (там баг с обработкой 204-нотификаций).
 func (s *Server) HTTPHandler() http.Handler {
-	return mcp.NewStreamableHTTPHandler(
-		func(r *http.Request) *mcp.Server {
-			return s.mcpServer
-		},
-		&mcp.StreamableHTTPOptions{
-			Stateless:    true,
-			JSONResponse: true,
-		},
+	return mcp.NewSSEHandler(
+		func(r *http.Request) *mcp.Server { return s.mcpServer },
+		nil,
 	)
 }

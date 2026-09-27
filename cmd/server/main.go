@@ -69,20 +69,24 @@ func main() {
 	// ── Создаём MCP-сервер ──────────────────────────────────────
 	mcpServer := mcp.NewServer(safeSearcher, log)
 
-	// ── HTTP mux ────────────────────────────────────────────────
-	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcpServer.HTTPHandler())
-
-	// Health-check endpoint для мониторинга.
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","search_enabled":%v}`, cfg.Enabled)
-	})
+    // ── HTTP mux ────────────────────────────────────────────────
+    mux := http.NewServeMux()
+    mux.Handle("/sse", mcpServer.HTTPHandler())    
+    // Health-check endpoint для мониторинга.
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+    	w.Header().Set("Content-Type", "application/json")
+    	fmt.Fprintf(w, `{"status":"ok","search_enabled":%v}`, cfg.Enabled)
+    })
+    
+    // CORS-обёртка: WebUI (llama-server WebUI) обращается к MCP-серверу
+    // напрямую с другого origin (обычно http://127.0.0.1:8080).
+    // Без этих заголовков браузер блокирует запрос ещё до отправки.
+    handler := withCORS(mux)
 
 	// ── HTTP-сервер ─────────────────────────────────────────────
 	httpServer := &http.Server{
 		Addr:         *addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second, // поиск может занимать время
 		IdleTimeout:  60 * time.Second,
@@ -143,4 +147,33 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// withCORS добавляет CORS-заголовки и обрабатывает preflight OPTIONS.
+//
+// Разрешаем любой Origin, потому что MCP-сервер по умолчанию слушает
+// только loopback (:8090) и не предназначен для внешней сети. Если
+// планируете выставлять его наружу — ограничьте список Origin'ов.
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
+		w.Header().Set("Access-Control-Allow-Headers",
+			"Content-Type, Accept, Authorization, "+
+				"Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		// Preflight — отвечаем 204 без тела и без вызова next.
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

@@ -7,31 +7,49 @@ import (
 	"testing"
 
 	"mcp-search-server/internal/search"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestWebSearchToolRegistered(t *testing.T) {
-	// Создаём сервер с отключённым поиском.
 	cfg := search.DefaultSafeSearchConfig()
 	cfg.Enabled = false
 	searcher := search.New(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	safeSearcher := search.NewSafeSearcher(searcher, cfg)
 	server := NewServer(safeSearcher, slog.Default())
 
-	if server.mcpServer == nil {
-		t.Fatal("mcpServer is nil")
+	ctx := context.Background()
+
+	// Создаём пару in-memory транспортов: клиент ↔ сервер.
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+
+	// Подключаем сервер к его транспорту.
+	_, err := server.mcpServer.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
 	}
 
-	// Проверяем, что инструмент зарегистрирован через ListTools.
-	ctx := context.Background()
-	tools, err := server.mcpServer.ListTools(ctx)
+	// Создаём клиента и подключаем его к клиентскому транспорту.
+	client := mcp.NewClient(
+		&mcp.Implementation{Name: "test-client", Version: "v0.0.1"},
+		nil,
+	)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer session.Close()
+
+	// Теперь ListTools доступен на клиентской сессии.
+	res, err := session.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(tools))
+	if len(res.Tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(res.Tools))
 	}
-	if tools[0].Name != "web_search" {
-		t.Errorf("expected tool name web_search, got %s", tools[0].Name)
+	if res.Tools[0].Name != "web_search" {
+		t.Errorf("expected tool name web_search, got %s", res.Tools[0].Name)
 	}
 }
 

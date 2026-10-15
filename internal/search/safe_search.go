@@ -39,6 +39,7 @@ func DefaultSafeSearchConfig() SafeSearchConfig {
 		RequestTimeout:             10 * time.Second,
 		LogDir:                     ".gogitor",
 		AllowedDomains: []string{
+			// программирование / документация
 			"pkg.go.dev",
 			"go.dev",
 			"golang.org",
@@ -48,14 +49,24 @@ func DefaultSafeSearchConfig() SafeSearchConfig {
 			"golangci-lint.run",
 			"stackoverflow.com",
 			"developer.mozilla.org",
+			"readthedocs.io",
+			"docs.python.org",
+			"cppreference.com",
+			// общие энциклопедии
 			"en.wikipedia.org",
 			"ru.wikipedia.org",
-            "wttr.in",
-			"meteum.ai",
-			"yandex.com",
+			// погода и справочники (можно удалить, если не нужно)
+			"wttr.in",
 			"open-meteo.com",
+			"meteoblue.com",
+			"meteum.ai",
+			"yandex.ru",
+			"yandex.com",
+			"gismeteo.ru",
+			// поисковики (на случай редиректов)
 			"google.com",
 		},
+
 	}
 }
 
@@ -169,12 +180,13 @@ func (s *SafeSearcher) Search(ctx context.Context, query string) (*Result, error
 	searchCtx, cancel := context.WithTimeout(ctx, totalTimeout)
 	defer cancel()
 
-	// ── Устанавливаем фильтр URL ДО вызова Search ───────────────
-	s.searcher.SetURLFilter(func(rawURL string) bool {
+	// ── Фильтр URL передаём как аргумент вызова: так один Searcher
+	//    можно безопасно использовать из нескольких горутин ──────
+	filter := func(rawURL string) bool {
 		return s.isURLAllowed(rawURL)
-	})
+	}
 
-	result, err := s.searcher.Search(searchCtx, query)
+	result, err := s.searcher.Search(searchCtx, query, filter)
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
@@ -188,10 +200,9 @@ func (s *SafeSearcher) Search(ctx context.Context, query string) (*Result, error
 	return result, nil
 }
 
+
 func (s *SafeSearcher) filterAndSanitize(result *Result) *Result {
 	var filteredSources []Source
-	var contentParts []string
-
 	for _, src := range result.Sources {
 		if len(filteredSources) >= s.config.MaxSourcesPerSearch {
 			break
@@ -202,24 +213,15 @@ func (s *SafeSearcher) filterAndSanitize(result *Result) *Result {
 		filteredSources = append(filteredSources, src)
 	}
 
-	if result.Content != "" {
-		content := result.Content
-		// Обрезка на уровне отдельного источника.
-		perSource := s.config.MaxContentPerSource
-		if perSource > 0 && len(content) > perSource {
-			content = content[:perSource] + "\n... [content truncated for safety]"
-		}
-		// Обрезка на уровне всего контента.
-		if len(content) > s.config.MaxTotalContent {
-			content = content[:s.config.MaxTotalContent] + "\n... [content truncated for safety]"
-		}
-		contentParts = append(contentParts, content)
+	content := result.Content
+	if s.config.MaxTotalContent > 0 && len(content) > s.config.MaxTotalContent {
+		content = content[:s.config.MaxTotalContent] +
+			"\n... [content truncated for safety]"
 	}
 
-	sanitized := sanitizeWebContent(strings.Join(contentParts, "\n\n"))
 	return &Result{
 		Query:   result.Query,
-		Content: sanitized,
+		Content: sanitizeWebContent(content),
 		Sources: filteredSources,
 	}
 }

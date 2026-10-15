@@ -64,8 +64,12 @@ func main() {
 
 	// ── Создаём Searcher и SafeSearcher ─────────────────────────
 	searcher := search.New(log)
+	// Собираем цепочку поисковых бэкендов из env:
+	//   SEARXNG_URL    → SearXNG (приоритет 1, ключ не нужен)
+	//   BRAVE_API_KEY  → Brave Search API (приоритет 2)
+	//   DuckDuckGo     → всегда добавляется как fallback
+	searcher.ConfigureBackendsFromEnv(os.Getenv)
 	safeSearcher := search.NewSafeSearcher(searcher, cfg)
-
 	// ── Создаём MCP-сервер ──────────────────────────────────────
 	mcpServer := mcp.NewServer(safeSearcher, log)
 
@@ -73,10 +77,12 @@ func main() {
     mux := http.NewServeMux()
     mux.Handle("/sse", mcpServer.HTTPHandler())    
     // Health-check endpoint для мониторинга.
-    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-    	w.Header().Set("Content-Type", "application/json")
-    	fmt.Fprintf(w, `{"status":"ok","search_enabled":%v}`, cfg.Enabled)
-    })
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w,
+			`{"status":"ok","search_enabled":%v}`, cfg.Enabled)
+	})
     
     // CORS-обёртка: WebUI (llama-server WebUI) обращается к MCP-серверу
     // напрямую с другого origin (обычно http://127.0.0.1:8080).

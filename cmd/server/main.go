@@ -75,8 +75,10 @@ func main() {
 
     // ── HTTP mux ────────────────────────────────────────────────
     mux := http.NewServeMux()
-    mux.Handle("/sse", mcpServer.HTTPHandler())    
-    // Health-check endpoint для мониторинга.
+    // SSE — для WebUI (через --webui-mcp-proxy llama-server).
+    mux.Handle("/sse", mcpServer.HTTPHandler())
+    // Streamable HTTP — для Claude Code (современный транспорт).
+    mux.Handle("/mcp", mcpServer.StreamableHTTPHandler())
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -131,3 +131,13 @@ func (s *Server) HTTPHandler() http.Handler {
 		nil,
 	)
 }
+
+// StreamableHTTPHandler возвращает http.Handler для Streamable HTTP транспорта.
+// Используется современными MCP-клиентами (Claude Code).
+// SSE (HTTPHandler) остаётся для WebUI через CORS-прокси llama-server.
+func (s *Server) StreamableHTTPHandler() http.Handler {
+	return mcp.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcp.Server { return s.mcpServer },
+		nil, // при необходимости — &mcp.StreamableHTTPOptions{...}
+	)
+}
